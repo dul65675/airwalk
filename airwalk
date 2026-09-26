@@ -1,96 +1,47 @@
 --[[
-	AirWalk COMPLET (Q/E + Respawn FIX + TP FIX)
+	AirWalk CoreGui Edition (Passe partout même avec anti-cheat)
 ]]
 
-local player = game.Players.LocalPlayer
+local identifyexecutorname = (identifyexecutor and identifyexecutor()) or "Unknown"
+local clonereference = cloneref or function(...) return ... end
+local clonefunction = clonefunction or function(...) return ... end
 
--- Services
-local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
+local coregui = game:GetService("CoreGui")
+local players = game:GetService("Players")
+local localplayer = players.LocalPlayer
+local userinputservice = game:GetService("UserInputService")
+local runservice = game:GetService("RunService")
 
--- Variables perso
+-- Character setup
 local character
 local humanoidRootPart
 
--- Setup personnage
 local function setupCharacter(char)
 	character = char
 	humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 end
 
-setupCharacter(player.Character or player.CharacterAdded:Wait())
-player.CharacterAdded:Connect(setupCharacter)
+setupCharacter(localplayer.Character or localplayer.CharacterAdded:Wait())
+localplayer.CharacterAdded:Connect(setupCharacter)
 
--- Rounded
-local function addRoundCorner(guiObject, radius)
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, radius)
-	corner.Parent = guiObject
-end
+-- STATE MANAGEMENT
+local scriptstate = {
+	airwalkon = false,
+	uiactive = true,
+	platformY = 0,
+	movingUp = false,
+	movingDown = false,
+	speed = 0.5
+}
 
--- GUI
-local screenGui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
-screenGui.Name = "AirWalkGUI"
-screenGui.ResetOnSpawn = false
+local dragstate = {
+	active = false,
+	offset = Vector2.new(0, 0),
+	lastclicktime = 0,
+	clickthreshold = 0.3
+}
 
-local mainFrame = Instance.new("Frame", screenGui)
-mainFrame.Size = UDim2.new(0, 200, 0, 150)
-mainFrame.Position = UDim2.new(0.5, -100, 0.5, -75)
-mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-mainFrame.BackgroundTransparency = 0.3
-mainFrame.Active = true
-mainFrame.Draggable = true
-addRoundCorner(mainFrame, 10)
-
--- Boutons
-local closeButton = Instance.new("TextButton", mainFrame)
-closeButton.Text = "X"
-closeButton.Size = UDim2.new(0, 30, 0, 30)
-closeButton.Position = UDim2.new(1, -35, 0, 5)
-closeButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-addRoundCorner(closeButton, 6)
-
-local minimizeButton = Instance.new("TextButton", mainFrame)
-minimizeButton.Text = "-"
-minimizeButton.Size = UDim2.new(0, 30, 0, 30)
-minimizeButton.Position = UDim2.new(1, -70, 0, 5)
-minimizeButton.BackgroundColor3 = Color3.fromRGB(255, 170, 0)
-addRoundCorner(minimizeButton, 6)
-
-local airWalkButton = Instance.new("TextButton", mainFrame)
-airWalkButton.Text = "Air Walk"
-airWalkButton.Size = UDim2.new(0.8, 0, 0, 40)
-airWalkButton.Position = UDim2.new(0.1, 0, 0.3, 0)
-airWalkButton.BackgroundColor3 = Color3.fromRGB(100, 255, 100)
-addRoundCorner(airWalkButton, 8)
-
-local heightLabel = Instance.new("TextLabel", mainFrame)
-heightLabel.Size = UDim2.new(0.8, 0, 0, 30)
-heightLabel.Position = UDim2.new(0.1, 0, 0.65, 0)
-heightLabel.BackgroundTransparency = 1
-heightLabel.TextColor3 = Color3.new(1, 1, 1)
-heightLabel.TextScaled = true
-
--- Mini bouton
-local ballButton = Instance.new("TextButton", screenGui)
-ballButton.Size = UDim2.new(0, 50, 0, 50)
-ballButton.Position = UDim2.new(0, 20, 0.5, -25)
-ballButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-ballButton.BackgroundTransparency = 0.3
-ballButton.Visible = false
-ballButton.Active = true
-ballButton.Draggable = true
-addRoundCorner(ballButton, 25)
-
-local awLabel = Instance.new("TextLabel", ballButton)
-awLabel.Text = "AW"
-awLabel.Size = UDim2.new(1, 0, 1, 0)
-awLabel.BackgroundTransparency = 1
-awLabel.TextColor3 = Color3.new(1, 1, 1)
-awLabel.TextScaled = true
-awLabel.Font = Enum.Font.GothamBold
-
--- Plateforme
+-- PLATFORM
 local platform = Instance.new("Part")
 platform.Anchored = true
 platform.Size = Vector3.new(5, 1, 5)
@@ -98,87 +49,167 @@ platform.Transparency = 1
 platform.CanCollide = false
 platform.Parent = workspace
 
-local airWalkOn = false
-local platformY = 0
+-- ===== UI CONSTRUCTION (CoreGui - bypasses PlayerGui blocks) =====
+local screengui = Instance.new("ScreenGui")
+screengui.Name = "AirWalkUI" .. math.random(10000, 99999)
+screengui.ResetOnSpawn = false
+screengui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screengui.Parent = coregui
 
--- CONTROLE
-local movingUp = false
-local movingDown = false
-local speed = 0.5
+-- Main button frame (rounded pill)
+local mainbutton = Instance.new("Frame")
+mainbutton.Name = "MainButton"
+mainbutton.Size = UDim2.new(0, 200, 0, 60)
+mainbutton.Position = UDim2.new(0, 20, 0.5, -30)
+mainbutton.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+mainbutton.BorderSizePixel = 0
+mainbutton.Parent = screengui
 
-UserInputService.InputBegan:Connect(function(input, gp)
+-- Corner radius
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 30)
+corner.Parent = mainbutton
+
+-- Icon (shoe = airwalk lmao)
+local iconlabel = Instance.new("TextLabel")
+iconlabel.Name = "Icon"
+iconlabel.Size = UDim2.new(0, 40, 0, 40)
+iconlabel.Position = UDim2.new(0, 10, 0.5, -20)
+iconlabel.BackgroundTransparency = 1
+iconlabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+iconlabel.TextSize = 24
+iconlabel.Font = Enum.Font.GothamBold
+iconlabel.Text = "👟"
+iconlabel.Parent = mainbutton
+
+-- Status text
+local statuslabel = Instance.new("TextLabel")
+statuslabel.Name = "StatusLabel"
+statuslabel.Size = UDim2.new(0, 140, 0, 40)
+statuslabel.Position = UDim2.new(0, 55, 0.5, -20)
+statuslabel.BackgroundTransparency = 1
+statuslabel.TextColor3 = Color3.fromRGB(100, 100, 200)
+statuslabel.TextSize = 12
+statuslabel.Font = Enum.Font.Gotham
+statuslabel.TextXAlignment = Enum.TextXAlignment.Left
+statuslabel.TextWrapped = true
+statuslabel.Text = "AirWalk\nOFF"
+statuslabel.Parent = mainbutton
+
+-- Height display (petit label)
+local heightlabel = Instance.new("TextLabel")
+heightlabel.Name = "HeightLabel"
+heightlabel.Size = UDim2.new(0, 180, 0, 20)
+heightlabel.Position = UDim2.new(0, 20, 0, 70)
+heightlabel.BackgroundTransparency = 1
+heightlabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+heightlabel.TextSize = 10
+heightlabel.Font = Enum.Font.Gotham
+heightlabel.Text = "H: 0.000"
+heightlabel.Parent = screengui
+
+-- ===== MOUSE INPUT HANDLING =====
+local mousedown = false
+local dragdistance = 0
+
+mainbutton.InputBegan:Connect(function(input, gameprocessed)
+	if gameprocessed then return end
+	
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		mousedown = true
+		dragdistance = 0
+		dragstate.lastclicktime = tick()
+		dragstate.offset = userinputservice:GetMouseLocation() - mainbutton.AbsolutePosition
+	end
+end)
+
+mainbutton.InputEnded:Connect(function(input, gameprocessed)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		mousedown = false
+		local clickduration = tick() - dragstate.lastclicktime
+		
+		if clickduration < dragstate.clickthreshold and dragdistance < 10 then
+			-- TOGGLE AIRWALK
+			if humanoidRootPart then
+				scriptstate.platformY = humanoidRootPart.Position.Y - 3
+				scriptstate.airwalkon = not scriptstate.airwalkon
+				platform.CanCollide = scriptstate.airwalkon
+			end
+		end
+	end
+end)
+
+-- ===== KEYBOARD CONTROLS =====
+userinputservice.InputBegan:Connect(function(input, gp)
 	if gp then return end
 	
 	if input.KeyCode == Enum.KeyCode.E then
-		movingUp = true
+		scriptstate.movingUp = true
 	elseif input.KeyCode == Enum.KeyCode.Q then
-		movingDown = true
+		scriptstate.movingDown = true
 	end
 end)
 
-UserInputService.InputEnded:Connect(function(input)
+userinputservice.InputEnded:Connect(function(input)
 	if input.KeyCode == Enum.KeyCode.E then
-		movingUp = false
+		scriptstate.movingUp = false
 	elseif input.KeyCode == Enum.KeyCode.Q then
-		movingDown = false
+		scriptstate.movingDown = false
 	end
 end)
 
--- Update
-RunService.RenderStepped:Connect(function()
+-- ===== MAIN LOOP =====
+runservice.RenderStepped:Connect(function()
+	-- AIRWALK LOGIC
 	if humanoidRootPart then
 		
-		if airWalkOn then
-			
-			-- 🔥 FIX TP : recalage auto
-			if math.abs(humanoidRootPart.Position.Y - platformY) > 10 then
-				platformY = humanoidRootPart.Position.Y - 3
+		if scriptstate.airwalkon then
+			-- Auto-recalc si teleport
+			if math.abs(humanoidRootPart.Position.Y - scriptstate.platformY) > 10 then
+				scriptstate.platformY = humanoidRootPart.Position.Y - 3
 			end
 			
-			if movingUp then
-				platformY = platformY + speed
+			if scriptstate.movingUp then
+				scriptstate.platformY = scriptstate.platformY + scriptstate.speed
 			end
 			
-			if movingDown then
-				platformY = platformY - speed
+			if scriptstate.movingDown then
+				scriptstate.platformY = scriptstate.platformY - scriptstate.speed
 			end
 			
 			platform.Position = Vector3.new(
 				humanoidRootPart.Position.X,
-				platformY,
+				scriptstate.platformY,
 				humanoidRootPart.Position.Z
 			)
 			
 			platform.CanCollide = true
 		end
 		
-		heightLabel.Text = "Height: " .. string.format("%.3f", humanoidRootPart.Position.Y)
+		-- HEIGHT UPDATE
+		heightlabel.Text = "H: " .. string.format("%.3f", humanoidRootPart.Position.Y)
 	end
-end)
-
--- Toggle
-airWalkButton.MouseButton1Click:Connect(function()
-	if humanoidRootPart then
-		platformY = humanoidRootPart.Position.Y - 3
-		airWalkOn = not airWalkOn
-		platform.CanCollide = airWalkOn
+	
+	-- UI UPDATE
+	if scriptstate.airwalkon then
+		statuslabel.Text = "AirWalk\nON ✅"
+		statuslabel.TextColor3 = Color3.fromRGB(100, 200, 100)
+		iconlabel.Text = "👟"
+	else
+		statuslabel.Text = "AirWalk\nOFF"
+		statuslabel.TextColor3 = Color3.fromRGB(150, 100, 100)
+		iconlabel.Text = "👞"
 	end
-end)
-
--- Close
-closeButton.MouseButton1Click:Connect(function()
-	screenGui:Destroy()
-	platform:Destroy()
-end)
-
--- Minimize
-minimizeButton.MouseButton1Click:Connect(function()
-	mainFrame.Visible = false
-	ballButton.Visible = true
-end)
-
--- Restore
-ballButton.MouseButton1Click:Connect(function()
-	mainFrame.Visible = true
-	ballButton.Visible = false
+	
+	-- DRAG LOGIC
+	if mousedown then
+		local mousepos = userinputservice:GetMouseLocation()
+		local newpos = mousepos - dragstate.offset
+		
+		dragdistance = (newpos - mainbutton.AbsolutePosition).Magnitude
+		
+		if dragdistance > 5 then
+			mainbutton.Position = UDim2.new(0, newpos.X, 0, newpos.Y)
+		end
+	end
 end)
