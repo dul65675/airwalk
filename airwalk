@@ -70,16 +70,16 @@ local corner = Instance.new("UICorner")
 corner.CornerRadius = UDim.new(0, 30)
 corner.Parent = mainbutton
 
--- Icon (shoe = airwalk lmao)
+-- Icon
 local iconlabel = Instance.new("TextLabel")
 iconlabel.Name = "Icon"
 iconlabel.Size = UDim2.new(0, 40, 0, 40)
 iconlabel.Position = UDim2.new(0, 10, 0.5, -20)
 iconlabel.BackgroundTransparency = 1
-iconlabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+iconlabel.TextColor3 = Color3.fromRGB(150, 100, 100)
 iconlabel.TextSize = 24
 iconlabel.Font = Enum.Font.GothamBold
-iconlabel.Text = "👟"
+iconlabel.Text = "👞"
 iconlabel.Parent = mainbutton
 
 -- Status text
@@ -88,7 +88,7 @@ statuslabel.Name = "StatusLabel"
 statuslabel.Size = UDim2.new(0, 140, 0, 40)
 statuslabel.Position = UDim2.new(0, 55, 0.5, -20)
 statuslabel.BackgroundTransparency = 1
-statuslabel.TextColor3 = Color3.fromRGB(100, 100, 200)
+statuslabel.TextColor3 = Color3.fromRGB(150, 100, 100)
 statuslabel.TextSize = 12
 statuslabel.Font = Enum.Font.Gotham
 statuslabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -96,17 +96,18 @@ statuslabel.TextWrapped = true
 statuslabel.Text = "AirWalk\nOFF"
 statuslabel.Parent = mainbutton
 
--- Height display (petit label)
-local heightlabel = Instance.new("TextLabel")
-heightlabel.Name = "HeightLabel"
-heightlabel.Size = UDim2.new(0, 180, 0, 20)
-heightlabel.Position = UDim2.new(0, 20, 0, 70)
-heightlabel.BackgroundTransparency = 1
-heightlabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-heightlabel.TextSize = 10
-heightlabel.Font = Enum.Font.Gotham
-heightlabel.Text = "H: 0.000"
-heightlabel.Parent = screengui
+-- ===== UI UPDATE (appelée seulement sur changement d'état) =====
+local function updateUI()
+	if scriptstate.airwalkon then
+		statuslabel.Text = "AirWalk\nON ✅"
+		statuslabel.TextColor3 = Color3.fromRGB(100, 200, 100)
+		iconlabel.Text = "👟"
+	else
+		statuslabel.Text = "AirWalk\nOFF"
+		statuslabel.TextColor3 = Color3.fromRGB(150, 100, 100)
+		iconlabel.Text = "👞"
+	end
+end
 
 -- ===== MOUSE INPUT HANDLING =====
 local mousedown = false
@@ -114,7 +115,7 @@ local dragdistance = 0
 
 mainbutton.InputBegan:Connect(function(input, gameprocessed)
 	if gameprocessed then return end
-	
+
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		mousedown = true
 		dragdistance = 0
@@ -127,13 +128,13 @@ mainbutton.InputEnded:Connect(function(input, gameprocessed)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		mousedown = false
 		local clickduration = tick() - dragstate.lastclicktime
-		
+
 		if clickduration < dragstate.clickthreshold and dragdistance < 10 then
-			-- TOGGLE AIRWALK
 			if humanoidRootPart then
 				scriptstate.platformY = humanoidRootPart.Position.Y - 3
 				scriptstate.airwalkon = not scriptstate.airwalkon
 				platform.CanCollide = scriptstate.airwalkon
+				updateUI()
 			end
 		end
 	end
@@ -142,7 +143,7 @@ end)
 -- ===== KEYBOARD CONTROLS =====
 userinputservice.InputBegan:Connect(function(input, gp)
 	if gp then return end
-	
+
 	if input.KeyCode == Enum.KeyCode.E then
 		scriptstate.movingUp = true
 	elseif input.KeyCode == Enum.KeyCode.Q then
@@ -158,58 +159,42 @@ userinputservice.InputEnded:Connect(function(input)
 	end
 end)
 
--- ===== MAIN LOOP =====
+-- ===== PHYSIQUE — Heartbeat (hors render thread, 0 impact FPS) =====
+runservice.Heartbeat:Connect(function()
+	if not humanoidRootPart then return end
+	if not scriptstate.airwalkon then return end
+
+	if math.abs(humanoidRootPart.Position.Y - scriptstate.platformY) > 10 then
+		scriptstate.platformY = humanoidRootPart.Position.Y - 3
+	end
+
+	if scriptstate.movingUp then
+		scriptstate.platformY = scriptstate.platformY + scriptstate.speed
+	end
+
+	if scriptstate.movingDown then
+		scriptstate.platformY = scriptstate.platformY - scriptstate.speed
+	end
+
+	platform.Position = Vector3.new(
+		humanoidRootPart.Position.X,
+		scriptstate.platformY,
+		humanoidRootPart.Position.Z
+	)
+
+	platform.CanCollide = true
+end)
+
+-- ===== DRAG — RenderStepped uniquement pour le drag =====
 runservice.RenderStepped:Connect(function()
-	-- AIRWALK LOGIC
-	if humanoidRootPart then
-		
-		if scriptstate.airwalkon then
-			-- Auto-recalc si teleport
-			if math.abs(humanoidRootPart.Position.Y - scriptstate.platformY) > 10 then
-				scriptstate.platformY = humanoidRootPart.Position.Y - 3
-			end
-			
-			if scriptstate.movingUp then
-				scriptstate.platformY = scriptstate.platformY + scriptstate.speed
-			end
-			
-			if scriptstate.movingDown then
-				scriptstate.platformY = scriptstate.platformY - scriptstate.speed
-			end
-			
-			platform.Position = Vector3.new(
-				humanoidRootPart.Position.X,
-				scriptstate.platformY,
-				humanoidRootPart.Position.Z
-			)
-			
-			platform.CanCollide = true
-		end
-		
-		-- HEIGHT UPDATE
-		heightlabel.Text = "H: " .. string.format("%.3f", humanoidRootPart.Position.Y)
-	end
-	
-	-- UI UPDATE
-	if scriptstate.airwalkon then
-		statuslabel.Text = "AirWalk\nON ✅"
-		statuslabel.TextColor3 = Color3.fromRGB(100, 200, 100)
-		iconlabel.Text = "👟"
-	else
-		statuslabel.Text = "AirWalk\nOFF"
-		statuslabel.TextColor3 = Color3.fromRGB(150, 100, 100)
-		iconlabel.Text = "👞"
-	end
-	
-	-- DRAG LOGIC
-	if mousedown then
-		local mousepos = userinputservice:GetMouseLocation()
-		local newpos = mousepos - dragstate.offset
-		
-		dragdistance = (newpos - mainbutton.AbsolutePosition).Magnitude
-		
-		if dragdistance > 5 then
-			mainbutton.Position = UDim2.new(0, newpos.X, 0, newpos.Y)
-		end
+	if not mousedown then return end
+
+	local mousepos = userinputservice:GetMouseLocation()
+	local newpos = mousepos - dragstate.offset
+
+	dragdistance = (newpos - mainbutton.AbsolutePosition).Magnitude
+
+	if dragdistance > 5 then
+		mainbutton.Position = UDim2.new(0, newpos.X, 0, newpos.Y)
 	end
 end)
